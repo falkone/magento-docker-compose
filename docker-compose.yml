@@ -1,0 +1,149 @@
+version: '3.7'
+services:
+
+#*** Varnish ***#
+  varnish:
+    image: magento/magento-cloud-docker-varnish:latest
+    environment:
+      - VIRTUAL_HOST=stagin-magento.your-domain.example
+      - VIRTUAL_PORT=80
+      - HTTPS_METHOD=noredirect
+    links:
+      - web-server:web
+    ports:
+      - 6081:80
+
+
+#*** nginx ***#
+  web-server:
+    image: nginx:1.9-alpine
+    links:
+      - php-fpm
+    volumes:
+      - type: bind
+        source: ./magento
+        target: /var/www/magento
+        consistency: delegated
+      - ./docker/config/vhost-magento.conf:/etc/nginx/conf.d/vhost-magento.conf:delegated
+      # Important! /var/www/magento/nginx.conf is included in vhost make sure it's pressent
+      # if not copy Magento sample file: nginx.conf.sample to nginx.conf
+    # ports:
+    #  - 80:80
+    environment:
+      - MAGENTO_ROOT=/var/www/magento
+      # Important! environment variables have to be set in vhost-magento.conf
+      # - FPM_HOST=php-fpm
+      # - FPM_PORT=9000
+      # - NGINX_HOST=stagin-magento.your-domain.example;
+      # - NGINX_PORT=80
+
+
+#*** PHP FPM ***#
+  php-fpm:
+    image: falkone/magento-docker-php-fpm:latest
+    links:
+      - sql-server
+      - elasticsearch-server
+      - redis-server
+      - rabbitmq-server
+      - maildev
+    volumes:
+      - type: bind
+        source: ./magento
+        target: /var/www/magento
+        consistency: delegated
+      - ./docker/config/php-fpm.ini:/usr/local/etc/php/conf.d/zz-magento.ini:delegated
+      - ./docker/config/php-fpm.conf:/usr/local/etc/zz-php-fpm.conf:delegated
+      - ./docker/config/ssmtp.conf:/etc/ssmtp/ssmtp.conf:delegated
+    environment:
+      - MAGENTO_ROOT=/var/www/magento
+    # ports:
+    #   - 9000:9000
+
+
+#*** PHP CLI ***#
+  php-cli:
+    image: falkone/magento-docker-php-cli:latest
+    hostname: php-cli
+    links:
+     - sql-server
+     - elasticsearch-server
+     - redis-server
+     - rabbitmq-server
+     - maildev
+    volumes:
+      - type: bind
+        source: ./magento
+        target: /var/www/magento
+        consistency: delegated
+      - ./docker/crontabs:/var/spool/cron/crontabs:delegated
+      - ./docker/config/php-cli.ini:/usr/local/etc/php/conf.d/zz-magento.ini:delegated
+      - ./docker/config/ssmtp.conf:/etc/ssmtp/ssmtp.conf:delegated
+      - ./docker/shared/root-userdir:/root:cached
+    tty: true
+    stdin_open: true
+
+
+#*** MariaDB ***#
+  sql-server:
+    # mysql -h sql-server -u magento2 -pmagento2! magento2 < dumpDB.sql
+    image: mariadb:10.2
+    hostname: dbhost
+    volumes:
+      - ./docker/shared/database:/var/lib/mysql:cached
+    environment:
+      MYSQL_ROOT_PASSWORD: secret!
+      MYSQL_DATABASE: magento2
+      MYSQL_USER: magento2
+      MYSQL_PASSWORD: magento2!
+    # ports:
+    #   - 3306:3306
+
+
+#*** Elasticsearch ***#
+  elasticsearch-server:
+    image: falkone/magento-docker-smile-elasticsearch:latest
+    environment:
+      - cluster.name=docker-cluster
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms1024m -Xmx1024m"
+    volumes:
+      - ./docker/shared/esdata:/usr/share/elasticsearch/data:cached
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    # ports:
+    #   - 9200:9200
+
+
+#*** Redis ***#
+  redis-server:
+    image: redis:3.2-alpine
+    # ports:
+    #   - 6379:6379
+    tty: true
+
+
+#*** RabbitMQ ***#
+  rabbitmq-server:
+    image: rabbitmq:3.7-alpine
+    volumes:
+      - ./docker/shared/rabbitmq_data:/var/lib/rabbitmq:cached
+    environment:
+      - RABBITMQ_DEFAULT_PASS=secret!
+      - RABBITMQ_DEFAULT_USER=magento2
+    # ports:
+    #  - 5672:5672
+
+
+#*** MailDev ***#
+  maildev:
+    image: djfarrelly/maildev
+    container_name: nwkh2-maildev
+    ports:
+      - 1080:80
