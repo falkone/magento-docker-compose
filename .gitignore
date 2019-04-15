@@ -1,0 +1,11 @@
+/.settings
+/.buildpath
+/.project
+*.orig
+.idea
+.vscode
+atlassian*
+
+application/.env
+application/environments/*/.env
+application/shared

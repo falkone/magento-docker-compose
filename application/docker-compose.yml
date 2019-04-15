@@ -1,0 +1,162 @@
+version: '3.7'
+services:
+
+#*** Varnish ***#
+  varnish:
+    container_name: varnish_${PROJECT_NAME}_${PROJECT_ENVIRONMENT}
+    image: magento/magento-cloud-docker-varnish:latest
+    environment:
+      - VIRTUAL_HOST=${VARNISH_DOMAIN_NAME}
+      - VIRTUAL_PORT=${VARNISH_VIRTUAL_PORT}
+      - HTTPS_METHOD=noredirect
+    links:
+      - web-server:web
+    ports:
+      # - 6081:80
+      - 80:80
+
+
+#*** nginx ***#
+  web-server:
+    container_name: nginx_${PROJECT_NAME}_${PROJECT_ENVIRONMENT}
+    image: nginx:1.9-alpine
+    links:
+      - php-fpm
+    volumes:
+      - magentowebroot:/var/www/magento
+      - ./config/vhost-magento.conf:/etc/nginx/conf.d/vhost-magento.template:delegated
+      # Important! /var/www/magento/nginx.conf is included in vhost make sure it's pressent
+      # if not copy Magento sample file: nginx.conf.sample to nginx.conf
+    # ports:
+    #  - 80:80
+    environment:
+      - MAGENTO_ROOT=${MAGENTO_ROOT}
+      - MAGENTO_CONF_FILE=${MAGENTO_CONF_FILE}
+      - NGINX_HOST=${NGINX_HOST}
+      - NGINX_PORT=${NGINX_PORT}
+      - FPM_HOST=php-fpm
+      - FPM_PORT=9000
+    command: /bin/sh -c "envsubst < /etc/nginx/conf.d/vhost-magento.template > /etc/nginx/conf.d/default.conf && cat /etc/nginx/conf.d/default.conf && exec nginx -g 'daemon off;'"
+
+
+#*** PHP FPM ***#
+  php-fpm:
+    container_name: php-fpm_${PROJECT_NAME}_${PROJECT_ENVIRONMENT}
+    image: falkone/magento-docker-php-fpm:latest
+    links:
+      - sql-server
+      - elasticsearch-server
+      - redis-server
+      - rabbitmq-server
+      - maildev
+    volumes:
+      - magentowebroot:/var/www/magento
+      - ./config/php-fpm.ini:/usr/local/etc/php/conf.d/zz-magento.ini:delegated
+      - ./config/php-fpm.conf:/usr/local/etc/zz-php-fpm.conf:delegated
+      - ./config/ssmtp.conf:/etc/ssmtp/ssmtp.conf:delegated
+    environment:
+      - MAGENTO_ROOT=/var/www/magento
+    # ports:
+    #   - 9000:9000
+
+
+#*** PHP CLI ***#
+  php-cli:
+    container_name: php-cli_${PROJECT_NAME}_${PROJECT_ENVIRONMENT}
+    image: falkone/magento-docker-php-cli:latest
+    hostname: php-cli
+    links:
+     - sql-server
+     - elasticsearch-server
+     - redis-server
+     - rabbitmq-server
+     - maildev
+    volumes:
+      - magentowebroot:/var/www/magento
+      - ./crontabs:/var/spool/cron/crontabs:delegated
+      - ./config/php-cli.ini:/usr/local/etc/php/conf.d/zz-magento.ini:delegated
+      - ./config/ssmtp.conf:/etc/ssmtp/ssmtp.conf:delegated
+      - ./shared/root-userdir:/root:cached
+    tty: true
+    stdin_open: true
+
+
+#*** MariaDB ***#
+  sql-server:
+    container_name: sql_${PROJECT_NAME}_${PROJECT_ENVIRONMENT}
+    # mysql -h sql-server -u magento2 -pmagento2! magento2 < dumpDB.sql
+    image: mariadb:10.2
+    hostname: dbhost
+    volumes:
+      - sqldatavolume:/var/lib/mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    # ports:
+    #   - 3306:3306
+
+
+#*** Elasticsearch ***#
+  elasticsearch-server:
+    container_name: elasticsearch_${PROJECT_NAME}_${PROJECT_ENVIRONMENT}
+    image: falkone/magento-docker-smile-elasticsearch:latest
+    environment:
+      - cluster.name=docker-cluster
+      - bootstrap.memory_lock=true
+      - "ES_JAVA_OPTS=-Xms1024m -Xmx1024m"
+    volumes:
+      - esdatavolume:/usr/share/elasticsearch/data
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+    # ports:
+    #   - 9200:9200
+
+
+#*** Redis ***#
+  redis-server:
+    container_name: redis_${PROJECT_NAME}_${PROJECT_ENVIRONMENT}
+    image: redis:3.2-alpine
+    volumes:
+      - redisdatavolume:/data
+    # ports:
+    #   - 6379:6379
+    tty: true
+
+
+#*** RabbitMQ ***#
+  rabbitmq-server:
+    container_name: rabbitmq_${PROJECT_NAME}_${PROJECT_ENVIRONMENT}
+    image: rabbitmq:3.7-alpine
+    volumes:
+      - rabbitmqdatavolume:/var/lib/rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+    # ports:
+    #  - 5672:5672
+
+
+#*** MailDev ***#
+  maildev:
+    container_name: maildev_${PROJECT_NAME}_${PROJECT_ENVIRONMENT}
+    image: djfarrelly/maildev
+    ports:
+      - 1080:80
+
+
+#*** Docker Volumes ***#
+volumes:
+  magentowebroot:
+      name: "${PROJECT_NAME}_${PROJECT_ENVIRONMENT}_web-root_volume"
+  sqldatavolume:
+      name: "${PROJECT_NAME}_${PROJECT_ENVIRONMENT}_sql_volume"
+  esdatavolume:
+      name: "${PROJECT_NAME}_${PROJECT_ENVIRONMENT}_elasticsearch_volume"
+  redisdatavolume:
+      name: "${PROJECT_NAME}_${PROJECT_ENVIRONMENT}_redis_volume"
+  rabbitmqdatavolume:
+      name: "${PROJECT_NAME}_${PROJECT_ENVIRONMENT}_rabbitmq_volume"
